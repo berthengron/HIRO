@@ -25,12 +25,12 @@ jobs:
       - name: Log in to dockerhub
         run: docker login --username alistair@hiro.capital -p ${{ secrets.DOCKERHUB_KEY }}
       - name: Build docker image
-        run: docker build -t sausages .
+        run: docker build -t hiro .
       - name: Tag image
-        run: docker tag sausages alihop/sausages:${SHORT_SHA}
+        run: docker tag hiro alihop/hiro:${SHORT_SHA}
       - name: Tag image latest
-        run: docker tag sausages alihop/sausages:${{ steps.package-version.outputs.current-version}}
+        run: docker tag hiro alihop/hiro:${{ steps.package-version.outputs.current-version}}
       - name: Tag image latest
-        run: docker tag sausages alihop/sausages:latest
+        run: docker tag hiro alihop/hiro:latest
       - name: Push docker all tags 
-        run: docker push -a alihop/sausages
+        run: docker push -a alihop/hiro
