@@ -46,9 +46,6 @@ jobs:
       - name: Push Docker image
         run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/hiro:${{ env.SHORT_SHA }}
 
-      - name: Enable IAP API
-        run: gcloud services enable iap.googleapis.com
-
       - name: Deploy to Cloud Run
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v1
