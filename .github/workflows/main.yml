@@ -71,4 +71,4 @@ jobs:
           gcloud run services add-iam-policy-binding ${{ env.SERVICE_NAME }} \
             --region=${{ env.REGION }} \
             --member='domain:hiro.capital' \
-            --role='roles/iap.httpsResourceAccessor'
+            --role='roles/run.invoker'
