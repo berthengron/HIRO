@@ -12,20 +12,18 @@ env:
   SERVICE_NAME: integrated-resource-optimizer-staging
 
 jobs:
-  build-and-deploy:
-    name: Build & Deploy
+  build:
+    name: Build and Push Docker Image
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.get-sha.outputs.SHORT_SHA }}
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
       - name: Get Short SHA
         id: get-sha
-        run: echo "SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-8)" >> $GITHUB_ENV
-
-      - name: Get NPM version
-        id: package-version
-        uses: martinbeentjes/npm-get-version-action@v1.3.1
+        run: echo "SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-8)" >> $GITHUB_OUTPUT
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
@@ -40,11 +38,24 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/hiro:${{ env.SHORT_SHA }} \
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/hiro:${{ steps.get-sha.outputs.SHORT_SHA }} \
             --build-arg HUBSPOT_TOKEN=${{ secrets.HUBSPOT_TOKEN_DEV }} .
 
       - name: Push Docker image
-        run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/hiro:${{ env.SHORT_SHA }}
+        run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/hiro:${{ steps.get-sha.outputs.SHORT_SHA }}
+
+  deploy:
+    name: Deploy to Cloud Run
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
 
       - name: Deploy to Cloud Run
         id: deploy
@@ -52,13 +63,12 @@ jobs:
         with:
           service: ${{ env.SERVICE_NAME }}
           region: ${{ env.REGION }}
-          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/hiro:${{ env.SHORT_SHA }}
-          flags: '--platform managed --no-allow-unauthenticated'
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/hiro:${{ needs.build.outputs.image_tag }}
+          flags: '--no-allow-unauthenticated'
 
       - name: Set IAP Policy
         run: |
           gcloud run services add-iam-policy-binding ${{ env.SERVICE_NAME }} \
             --region=${{ env.REGION }} \
             --member='domain:hiro.capital' \
-            --role='roles/iap.httpsResourceAccessor' \
-            --platform=managed
+            --role='roles/iap.httpsResourceAccessor'
