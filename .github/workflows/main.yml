@@ -1,36 +1,67 @@
-name: Build Ionic App and Deploy Docker
+name: Build and Deploy to Google Cloud Run
+
 on:
   push:
     branches:
       - main
 
+env:
+  PROJECT_ID: hirocapital
+  REGION: europe-west1
+  REPO_NAME: integrated-resource-optimizer
+  SERVICE_NAME: integrated-resource-optimizer-staging
+
 jobs:
-  build:
+  build-and-deploy:
     name: Build & Deploy
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@master
-      - name: Add SHORT_SHA env property
-        run: echo "SHORT_SHA=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
+        uses: actions/checkout@v3
+
+      - name: Get Short SHA
+        id: get-sha
+        run: echo "SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-8)" >> $GITHUB_ENV
+
       - name: Get NPM version
         id: package-version
         uses: martinbeentjes/npm-get-version-action@v1.3.1
-      - name: Install Ionic
-        run: npm i -g @ionic/cli
-      - name: Install Dependencies
-        run: npm install
-      - name: Build
-        run: ionic build
-      - name: Log in to dockerhub
-        run: docker login --username alistair@hiro.capital -p ${{ secrets.DOCKERHUB_KEY }}
-      - name: Build docker image
-        run: docker build -t hiro .
-      - name: Tag image
-        run: docker tag hiro alihop/hiro:${SHORT_SHA}
-      - name: Tag image latest
-        run: docker tag hiro alihop/hiro:${{ steps.package-version.outputs.current-version}}
-      - name: Tag image latest
-        run: docker tag hiro alihop/hiro:latest
-      - name: Push docker all tags 
-        run: docker push -a alihop/hiro
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/hiro:${{ env.SHORT_SHA }} \
+            --build-arg HUBSPOT_TOKEN=${{ secrets.HUBSPOT_TOKEN_DEV }} .
+
+      - name: Push Docker image
+        run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/hiro:${{ env.SHORT_SHA }}
+
+      - name: Enable IAP API
+        run: gcloud services enable iap.googleapis.com
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v1
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/hiro:${{ env.SHORT_SHA }}
+          flags: '--platform managed --no-allow-unauthenticated'
+
+      - name: Set IAP Policy
+        run: |
+          gcloud run services add-iam-policy-binding ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --member='domain:hiro.capital' \
+            --role='roles/iap.httpsResourceAccessor' \
+            --platform=managed
